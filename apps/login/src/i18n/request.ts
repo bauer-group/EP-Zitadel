@@ -13,15 +13,15 @@ export default getRequestConfig(async () => {
   const _headers = await headers();
   const { serviceConfig } = getServiceConfig(_headers);
 
-  let allowedLanguages = LANGS.map((l) => l.code);
+  // CS-IAM divergence: offer every curated LANGS locale, independent of the backend's
+  // allowedLanguages (mirrors src/app/(login)/layout.tsx). The instance default language
+  // is still taken from the backend; for locales the Zitadel core does not support,
+  // backend-rendered strings fall back to that default.
+  const allowedLanguages = LANGS.map((l) => l.code);
   let defaultLanguage = fallback;
 
   try {
     const settings = await getAllowedLanguages({ serviceConfig });
-    if (settings.allowedLanguages?.length) {
-      const localLanguageCodes = LANGS.map((l) => l.code);
-      allowedLanguages = settings.allowedLanguages.filter((l) => localLanguageCodes.includes(l));
-    }
     if (settings.defaultLanguage) {
       defaultLanguage = settings.defaultLanguage;
     }
