@@ -1,0 +1,205 @@
+name: ⬆️ Upstream Login Bump
+
+# Automatic maintenance: keeps the branded Login v2 image current with upstream.
+#
+# On a new stable zitadel release (daily check, or manual dispatch) it:
+#   1. branches feature/bump-<tag> from that tag and re-applies the BAUER GROUP
+#      branding (the one-file patch + simple-icons + lockfile),
+#   2. BUILDS + PUBLISHES the login image (this is the gate — a release that
+#      breaks our patch fails here and nothing else happens),
+#   3. only then FORCE-ROLLS `production` to the new base (production is a
+#      "release tag + our patch" line, not an accumulating branch).
+#
+# The published image is PINNED by consumers (CS-IAM LOGIN_BASE_VERSION), so a
+# new base never auto-changes a running stack — CS-IAM adopts deliberately, in
+# lockstep with the core (BASE_ZITADEL_VERSION). This job just makes sure the
+# current image always exists.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily 06:00 UTC — skips fast when already current
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: "Upstream zitadel tag to bump to (blank = latest stable release)"
+        required: false
+        type: string
+
+permissions:
+  contents: write # force-roll production
+  packages: write # publish the login image
+
+concurrency:
+  group: upstream-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Track, build & adopt
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      INPUT_TAG: ${{ inputs.target_tag }}
+    steps:
+      - name: Checkout production
+        uses: actions/checkout@v4
+        with:
+          ref: production
+          fetch-depth: 0
+
+      - name: Resolve current + target versions
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(tr -d '[:space:]' < cs-iam-login.base-version 2>/dev/null || true)"
+          MAJOR="${CURRENT#v}"; MAJOR="${MAJOR%%.*}"
+          TARGET="$INPUT_TAG"
+          MANUAL=true
+          if [ -z "$TARGET" ]; then
+            # Track the highest STABLE release on the major line we're on (v${MAJOR}.x).
+            #
+            # NOT `releases/latest`: zitadel ships parallel maintenance lines, so a
+            # v3.x backport published *after* the newest v4.x flips GitHub's "latest"
+            # to v3 (it picks most-recent-by-DATE, not highest semver). That would
+            # downgrade us across a major and break — apps/login doesn't exist before
+            # v4. Major jumps are deliberate: dispatch manually with target_tag.
+            MANUAL=false
+            TARGET="$(gh api 'repos/zitadel/zitadel/releases?per_page=100' \
+              | jq -r --arg m "$MAJOR" '
+                  [ .[]
+                    | select(.draft == false and .prerelease == false)
+                    | .tag_name
+                    | select((ltrimstr("v") | split("."))
+                             | (length == 3 and .[0] == $m and all(test("^[0-9]+$"))))
+                  ]
+                  | sort_by(ltrimstr("v") | split(".") | map(tonumber))
+                  | last // ""')"
+          fi
+          if [ -z "$TARGET" ]; then
+            echo "::error::No stable upstream release resolved (current=$CURRENT, major=$MAJOR)."
+            exit 1
+          fi
+          DOCKER_VER="${TARGET#v}" # numeric tag for the image (no leading v)
+          SKIP=false
+          if [ "$CURRENT" = "$TARGET" ]; then
+            SKIP=true
+            echo "::notice::Login already based on $CURRENT — nothing to bump."
+          elif [ "$MANUAL" = "false" ]; then
+            # Forward-only on the automatic path: never roll backwards even if the
+            # resolved tag is somehow older (belt-and-suspenders to the major pin).
+            HIGHER="$(printf '%s\n%s\n' "${CURRENT#v}" "${TARGET#v}" | sort -V | tail -n1)"
+            if [ "$HIGHER" = "${CURRENT#v}" ]; then
+              SKIP=true
+              echo "::notice::Latest v${MAJOR}.x ($TARGET) is not newer than current ($CURRENT) — nothing to bump."
+            fi
+          fi
+          if [ "$SKIP" = "false" ]; then
+            echo "::notice::Bumping login base $CURRENT -> $TARGET"
+          fi
+          echo "current=$CURRENT"       >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET"         >> "$GITHUB_OUTPUT"
+          echo "docker_ver=$DOCKER_VER" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP"             >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        if: steps.ver.outputs.skip == 'false'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        if: steps.ver.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Prepare the new base + re-apply branding
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          TARGET: ${{ steps.ver.outputs.target }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/zitadel/zitadel.git
+          git fetch --depth 1 upstream "refs/tags/${TARGET}:refs/tags/${TARGET}"
+          git checkout -b "feature/bump-${TARGET}" "${TARGET}"
+          # Bring our (additive + one-file) customization + infra from production.
+          git checkout production -- \
+            cs-iam-login.Dockerfile \
+            cs-iam-login.Dockerfile.dockerignore \
+            .github/workflows/cs-iam-login.yml \
+            .github/workflows/upstream-bump.yml \
+            apps/login/src/components/idps/sign-in-with-generic.tsx
+          # Re-add the simple-icons dependency + record the new base version.
+          node -e "const f='apps/login/package.json';const p=require('./'+f);p.dependencies=p.dependencies||{};p.dependencies['simple-icons']='^16.23.0';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n');"
+          echo "${TARGET}" > cs-iam-login.base-version
+          corepack enable
+          pnpm install --lockfile-only --no-frozen-lockfile
+          git add -A
+          git commit -m "chore(login): bumped base to ${TARGET} + reapplied branding"
+
+      - name: Set up Buildx
+        if: steps.ver.outputs.skip == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.ver.outputs.skip == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        if: steps.ver.outputs.skip == 'false'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/bauer-group/ep-zitadel/zitadel-login
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.docker_ver }}
+            type=raw,value=stable
+            type=raw,value=latest
+            type=sha
+
+      - name: Build & publish (the gate)
+        if: steps.ver.outputs.skip == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./cs-iam-login.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Adopt — force-roll production to the new base
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # Reached only when the build above succeeded.
+          git push origin "HEAD:production" --force
+          git push origin --delete "feature/bump-${{ steps.ver.outputs.target }}" 2>/dev/null || true
+
+      - name: Summary
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          CURRENT: ${{ steps.ver.outputs.current }}
+          TARGET: ${{ steps.ver.outputs.target }}
+          DOCKER_VER: ${{ steps.ver.outputs.docker_ver }}
+        run: |
+          {
+            echo "## ⬆️ Login base bumped"
+            echo ""
+            echo "- Base: \`${CURRENT}\` → \`${TARGET}\`"
+            echo "- Published: \`ghcr.io/bauer-group/ep-zitadel/zitadel-login:${DOCKER_VER}\` (+ stable, latest)"
+            echo "- \`production\` rolled to the new base."
+            echo ""
+            echo "### Next (deliberate, in CS-IAM)"
+            echo "Bump in lockstep to keep core + login matched:"
+            echo "- \`LOGIN_BASE_VERSION\` → \`${DOCKER_VER}\` (src/login overlay base)"
+            echo "- \`BASE_ZITADEL_VERSION\` → \`${TARGET}\` (src/zitadel core)"
+          } >> "$GITHUB_STEP_SUMMARY"
