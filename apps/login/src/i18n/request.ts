@@ -61,7 +61,23 @@ export default getRequestConfig(async () => {
     });
 
     if (i18nJSON) {
-      translations = i18nJSON;
+      if (locale === defaultLanguage) {
+        translations = i18nJSON;
+      } else {
+        // The backend returns the instance default-language translation as a
+        // fallback when no custom hosted-login translation exists for `locale`.
+        // Merging that fallback would clobber the bundled locale file and render
+        // the UI in the default language. Only apply custom translations that
+        // genuinely belong to `locale` (i.e. differ from the default-language set).
+        const defaultJSON = await getHostedLoginTranslation({
+          serviceConfig,
+          locale: defaultLanguage,
+          organization: i18nOrganization,
+        });
+        if (!defaultJSON || JSON.stringify(defaultJSON) !== JSON.stringify(i18nJSON)) {
+          translations = i18nJSON;
+        }
+      }
     }
   } catch (error) {
     console.warn("Error fetching custom translations:", error);
