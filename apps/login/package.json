@@ -13,6 +13,9 @@
     "lint-fix": "prettier --write .",
     "test-unit": "vitest --run",
     "test-dockerized": "vitest --run --config vitest.config.dockerized.ts",
+    "ui-preview": "env-cmd -f .env.preview start-server-and-test ui-preview:serve http-get://127.0.0.1:3100/preview-idps ui-preview:shot",
+    "ui-preview:serve": "next dev -p 3100 -H 127.0.0.1",
+    "ui-preview:shot": "node scripts/ui-preview-shot.mjs",
     "lint-staged": "lint-staged",
     "clean": "rm -rf node_modules .next"
   },
