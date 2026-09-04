@@ -289,6 +289,9 @@ importers:
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
+      simple-icons:
+        specifier: ^16.23.0
+        version: 16.29.0
       tinycolor2:
         specifier: ^1.6.0
         version: 1.6.0
@@ -966,6 +969,7 @@ packages:
   '@angular/animations@21.2.20':
     resolution: {integrity: sha512-H3Abe/dfPKNaGaoaqjrN9tZYNrAcoPnx5STLiAmpFSO4wz82/wwPO2mZCOBG4qjefredkNuuW/e+uuqZccXabw==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    deprecated: '@angular/animations is deprecated. Use `animate.enter` and `animate.leave` instead. For more information see: https://v22.angular.dev/guide/animations.'
     peerDependencies:
       '@angular/core': 21.2.20
 
@@ -1096,6 +1100,7 @@ packages:
   '@angular/platform-browser-dynamic@21.2.20':
     resolution: {integrity: sha512-n3+eLj0F/hjf+cgLaNWsBcqZcaeGoh5TCMe+VXUnh6XRwbwXorxP91ypfMT/rj0QnroY6NoZcvvPlx1ezsIVrw==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    deprecated: '@angular/platform-browser-dynamic is deprecated. Use `@angular/platform-browser` instead.'
     peerDependencies:
       '@angular/common': 21.2.20
       '@angular/compiler': 21.2.20
@@ -10581,6 +10586,10 @@ packages:
   sigstore@4.1.1:
     resolution: {integrity: sha512-endqECJkfhozrXMK5ngu/UAA0xVcVEFdnHJCElGaExypjW+HK5i6zu3NteLoaX/iFbRUbC3+DjttQs0GARr+5w==}
     engines: {node: ^20.17.0 || >=22.9.0}
+
+  simple-icons@16.29.0:
+    resolution: {integrity: sha512-4H94f5ZgcCcgJroc902TFlFdgPu2IU2eD7+WebN2Z14xKYrKHeJ4UQcZwzgSuH4Rgzw+jp7sbHl40NefuIEYsg==}
+    engines: {node: '>=0.12.18'}
 
   simple-update-notifier@2.0.0:
     resolution: {integrity: sha512-a2B9Y0KlNXl9u/vsW6sTIu9vGEpfKu2wRV6l1H3XEas/0gUIzGzBoP/IouTcUQbm9JWZLH3COxyn03TYlFax6w==}
@@ -23197,6 +23206,8 @@ snapshots:
       '@sigstore/verify': 3.1.1
     transitivePeerDependencies:
       - supports-color
+
+  simple-icons@16.29.0: {}
 
   simple-update-notifier@2.0.0:
     dependencies:
