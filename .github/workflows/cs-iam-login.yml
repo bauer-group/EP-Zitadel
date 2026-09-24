@@ -1,0 +1,82 @@
+name: 🐳 CS-IAM Login Image
+
+# BAUER GROUP fork build: publishes the branded Zitadel Login v2 image to GHCR.
+# Upstream zitadel workflows stay disabled (Actions UI); this is our pipeline.
+# Self-contained build (docker/build-push-action) — robust in a public fork.
+# Production = release line (push); feature/*** PRs are validated build-only.
+
+on:
+  push:
+    branches: [production]
+    paths:
+      - "apps/login/**"
+      - "packages/**"
+      - "proto/**"
+      - "cs-iam-login.Dockerfile"
+      - "cs-iam-login.Dockerfile.dockerignore"
+      - "cs-iam-login.base-version"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/cs-iam-login.yml"
+  pull_request:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cs-iam-login-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 🐳 Build & Push login
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image version
+        id: ver
+        run: |
+          set -euo pipefail
+          V="$(tr -d '[:space:]' < cs-iam-login.base-version)"
+          V="${V#v}" # tag the image with the numeric upstream version (no leading v)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "::notice::Building login image version $V"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/bauer-group/ep-zitadel/zitadel-login
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=stable
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./cs-iam-login.Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
