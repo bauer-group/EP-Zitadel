@@ -1,0 +1,11 @@
+# Scoped ignore for the CS-IAM login build (buildkit uses this for
+# cs-iam-login.Dockerfile and leaves upstream .dockerignore untouched).
+# Cut the heavy artifacts; keep ALL source so nx can build the workspace graph.
+.git
+**/node_modules
+**/.next
+**/.nx
+**/.turbo
+**/dist
+**/.artifacts
+**/*.log
