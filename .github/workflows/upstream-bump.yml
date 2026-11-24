@@ -145,6 +145,11 @@ jobs:
           git checkout production -- .github/workflows
           # Re-add the simple-icons dependency + record the new base version.
           node -e "const f='apps/login/package.json';const p=require('./'+f);p.dependencies=p.dependencies||{};p.dependencies['simple-icons']='^16.23.0';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n');"
+          # Security floor for the shipped login image: upstream still pins
+          # next 16.4.3 (GHSA-pc58-hwjq-p385, GHSA-f3mh-rxg3-f5g2 and 5 more,
+          # fixed in 16.4.5). Raise-only, so it is a no-op once upstream pins
+          # >= the floor; drop the line when that happens.
+          node -e "const f='apps/login/package.json',floor='16.4.5';const p=require('./'+f);const cur=String(p.dependencies.next||'').replace(/^[^0-9]*/,'');const lt=(a,b)=>{a=a.split('.').map(Number);b=b.split('.').map(Number);for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]<b[i];}return false;};if(cur&&lt(cur,floor)){p.dependencies.next=floor;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n');console.log('next '+cur+' -> '+floor);}"
           echo "${TARGET}" > cs-iam-login.base-version
           corepack enable
           pnpm install --lockfile-only --no-frozen-lockfile
